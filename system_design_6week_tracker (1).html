@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>System Design — 6-Week Hybrid Tracker</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;color:#1a1a1a;background:#f5f4f0;padding:24px 16px 48px}
+.app{max-width:860px;margin:0 auto}
+
+.top-bar{display:flex;align-items:center;justify-content:space-between;margin-bottom:1.25rem;flex-wrap:wrap;gap:10px}
+.top-bar h1{font-size:18px;font-weight:500;color:#1a1a1a}
+.badges{display:flex;gap:8px;flex-wrap:wrap}
+.badge{font-size:11px;padding:3px 9px;border-radius:99px;border:0.5px solid;font-weight:500}
+.b-karan{background:#EEEDFE;color:#3C3489;border-color:#AFA9EC}
+.b-primer{background:#E1F5EE;color:#085041;border-color:#5DCAA5}
+
+.stats-row{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:1.25rem}
+.stat{background:#fff;border-radius:10px;padding:.75rem 1rem;text-align:center;border:0.5px solid #e0ddd5}
+.stat-val{font-size:22px;font-weight:500;line-height:1.2;color:#1a1a1a}
+.stat-lbl{font-size:11px;color:#888;margin-top:3px}
+
+.week-tabs{display:flex;gap:6px;margin-bottom:1rem;overflow-x:auto;padding-bottom:4px}
+.week-tab{flex-shrink:0;font-size:12px;font-weight:500;padding:5px 13px;border-radius:99px;border:0.5px solid #ccc;background:#fff;cursor:pointer;color:#666;transition:all .15s}
+.week-tab.active{color:#fff;border-color:transparent}
+
+.week-panel{display:none}
+.week-panel.active{display:block}
+
+.week-intro{padding:.75rem 1rem;border-radius:10px;margin-bottom:1rem;border:0.5px solid}
+.week-intro p{font-size:13px;line-height:1.6}
+.week-intro .theme{font-size:12px;font-weight:500;margin-bottom:4px;display:flex;align-items:center;gap:6px}
+
+.day-card{background:#fff;border:0.5px solid #e0ddd5;border-radius:12px;margin-bottom:.75rem;overflow:hidden}
+.day-header{display:flex;align-items:center;gap:10px;padding:.7rem 1rem;cursor:pointer;user-select:none}
+.day-header:hover{background:#f9f8f5}
+.day-pill{font-size:11px;font-weight:500;padding:2px 8px;border-radius:99px;flex-shrink:0;color:#fff;min-width:42px;text-align:center}
+.day-name{font-size:14px;font-weight:500;flex:1;color:#1a1a1a}
+.day-progress{font-size:11px;color:#888;flex-shrink:0}
+.day-chev{font-size:10px;color:#aaa;flex-shrink:0;transition:transform .2s}
+
+.day-body{display:none;border-top:0.5px solid #e8e5dd}
+.day-body.open{display:block}
+
+.source-tag{display:inline-flex;align-items:center;gap:4px;font-size:10px;padding:2px 7px;border-radius:99px;margin-bottom:.6rem;font-weight:500}
+.src-k{background:#EEEDFE;color:#534AB7}
+.src-p{background:#E1F5EE;color:#0F6E56}
+.src-b{background:#FAEEDA;color:#854F0B}
+
+.tasks-section{padding:.75rem 1rem}
+.tasks-label{font-size:11px;font-weight:500;color:#aaa;text-transform:uppercase;letter-spacing:.5px;margin-bottom:.6rem}
+.task-item{display:flex;align-items:flex-start;gap:10px;padding:6px 0;border-bottom:0.5px solid #eeece6;cursor:pointer}
+.task-item:last-child{border-bottom:none}
+.task-item.done .task-text{text-decoration:line-through;color:#bbb}
+.checkbox{width:17px;height:17px;border-radius:4px;border:1.5px solid #ccc;flex-shrink:0;margin-top:1px;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.checkbox.checked{border-color:transparent}
+.check-inner{font-size:10px;color:#fff;display:none}
+.checkbox.checked .check-inner{display:block}
+.task-text{font-size:13px;line-height:1.5;color:#1a1a1a}
+.task-meta{font-size:11px;color:#999;margin-top:2px}
+
+.progress-track{height:3px;background:#f0ede6;border-radius:2px;margin-top:6px}
+.progress-fill-bar{height:100%;border-radius:2px;transition:width .3s}
+
+@media(max-width:600px){
+  .stats-row{grid-template-columns:repeat(2,1fr)}
+  .week-tabs{flex-wrap:nowrap}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="top-bar">
+    <h1>System design — 6-week hybrid tracker</h1>
+    <div class="badges">
+      <span class="badge b-karan">karanpratapsingh</span>
+      <span class="badge b-primer">donnemartin/primer</span>
+    </div>
+  </div>
+
+  <div class="stats-row">
+    <div class="stat"><div class="stat-val" id="s-done">0</div><div class="stat-lbl">Tasks done</div></div>
+    <div class="stat"><div class="stat-val" id="s-total">0</div><div class="stat-lbl">Total tasks</div></div>
+    <div class="stat"><div class="stat-val" id="s-pct">0%</div><div class="stat-lbl">Progress</div></div>
+    <div class="stat"><div class="stat-val" id="s-streak">0</div><div class="stat-lbl">Day streak</div></div>
+  </div>
+
+  <div class="week-tabs" id="week-tabs"></div>
+  <div id="panels"></div>
+</div>
+
+<script>
+const WEEKS = [
+  {
+    color:"#534AB7", light:"#EEEDFE", border:"#AFA9EC", textc:"#3C3489",
+    title:"Networking & core foundations",
+    intro:"Start with Karan's clean explanations of networking fundamentals — the building blocks every distributed system stands on. No prior knowledge needed.",
+    days:[
+      {name:"What is system design + IP & OSI Model", src:"k", tasks:[
+        {t:"Read 'What is system design?' on karanpratapsingh repo",note:"Getting Started section"},
+        {t:"Study IP addressing and the OSI model layers",note:"Chapter I — karanpratapsingh"},
+        {t:"Sketch the 7 OSI layers from memory after reading",note:"Practice exercise"},
+        {t:"Write a 3-sentence summary of why system design matters",note:"Reflection"},
+      ]},
+      {name:"TCP, UDP & DNS", src:"k", tasks:[
+        {t:"Read TCP vs UDP trade-offs",note:"Chapter I — karanpratapsingh"},
+        {t:"Study DNS resolution flow (recursive vs iterative)",note:"Chapter I — karanpratapsingh"},
+        {t:"Cross-reference DNS section in donnemartin primer",note:"donnemartin — DNS"},
+        {t:"Draw a DNS resolution diagram from scratch",note:"Practice exercise"},
+      ]},
+      {name:"Load balancing & clustering", src:"k", tasks:[
+        {t:"Read load balancing — Layer 4 vs Layer 7",note:"Chapter I — karanpratapsingh"},
+        {t:"Study clustering — active-active vs active-passive",note:"Chapter I — karanpratapsingh"},
+        {t:"Compare with donnemartin's load balancer section",note:"donnemartin — Load balancers"},
+        {t:"List 3 real-world products that use L7 load balancing",note:"Research exercise"},
+      ]},
+      {name:"Caching & CDN", src:"k", tasks:[
+        {t:"Read caching fundamentals and eviction policies",note:"Chapter I — karanpratapsingh"},
+        {t:"Study CDN — push vs pull",note:"Chapter I — karanpratapsingh"},
+        {t:"Read donnemartin's full caching section",note:"donnemartin — Caching"},
+        {t:"Fill a table: cache-aside / write-through / write-behind / refresh-ahead",note:"Practice exercise"},
+      ]},
+      {name:"Proxy, availability & scalability", src:"k", tasks:[
+        {t:"Read forward vs reverse proxy",note:"Chapter I — karanpratapsingh"},
+        {t:"Study availability patterns — fail-over and replication",note:"Chapter I — karanpratapsingh"},
+        {t:"Read scalability concepts — vertical vs horizontal",note:"Chapter I — karanpratapsingh"},
+        {t:"Cross-check with donnemartin: performance vs scalability section",note:"donnemartin"},
+      ]},
+      {name:"Storage types deep dive", src:"k", tasks:[
+        {t:"Read RAID levels 0, 1, 5, 10",note:"Chapter I — karanpratapsingh"},
+        {t:"Study object storage, NAS, block storage",note:"Chapter I — karanpratapsingh"},
+        {t:"Watch CS75 Harvard scalability lecture (linked in donnemartin)",note:"donnemartin — Start here"},
+        {t:"Note 3 storage decisions you'd make for a cloud app",note:"Reflection"},
+      ]},
+      {name:"Week 1 review & Anki", src:"b", tasks:[
+        {t:"Redo all diagrams from this week from memory (no peeking)",note:"Consolidation"},
+        {t:"Run Anki flashcard deck — networking & foundations",note:"donnemartin Anki deck"},
+        {t:"Write a 1-page cheatsheet for Week 1 topics",note:"Consolidation"},
+        {t:"Self-quiz: explain CDN, load balancer, and DNS to a rubber duck",note:"Feynman technique"},
+      ]},
+    ]
+  },
+  {
+    color:"#0F6E56", light:"#E1F5EE", border:"#5DCAA5", textc:"#085041",
+    title:"Databases — foundations",
+    intro:"Karan's Chapter II is the most thorough beginner-friendly DB overview you'll find. Supplement with donnemartin's replication diagrams.",
+    days:[
+      {name:"Databases & DBMS fundamentals", src:"k", tasks:[
+        {t:"Read 'Databases and DBMS' introduction",note:"Chapter II — karanpratapsingh"},
+        {t:"Understand ACID properties with examples",note:"Chapter II — karanpratapsingh"},
+        {t:"Study SQL databases — when and why",note:"Chapter II — karanpratapsingh"},
+        {t:"Write one real-world example for each ACID property",note:"Practice exercise"},
+      ]},
+      {name:"NoSQL deep dive", src:"k", tasks:[
+        {t:"Read all 4 NoSQL types: key-value, document, wide-column, graph",note:"Chapter II — karanpratapsingh"},
+        {t:"Map each type to a real product (Redis, MongoDB, Cassandra, Neo4j)",note:"Research exercise"},
+        {t:"Read donnemartin's NoSQL section for comparison",note:"donnemartin — NoSQL"},
+        {t:"Decide: for a social graph, which NoSQL type wins and why?",note:"Design exercise"},
+      ]},
+      {name:"SQL vs NoSQL decision framework", src:"b", tasks:[
+        {t:"Read SQL vs NoSQL comparison section",note:"Chapter II — karanpratapsingh"},
+        {t:"Study CAP theorem — CP vs AP patterns",note:"Chapter II — karanpratapsingh & donnemartin"},
+        {t:"Study PACELC theorem (Karan covers this, Primer doesn't)",note:"Chapter II — karanpratapsingh"},
+        {t:"For 3 apps (bank, social feed, IoT sensor), pick a DB and justify it",note:"Design exercise"},
+      ]},
+      {name:"Database replication", src:"b", tasks:[
+        {t:"Read replication patterns — synchronous vs async",note:"Chapter II — karanpratapsingh"},
+        {t:"Study master-slave and master-master in donnemartin",note:"donnemartin — Replication"},
+        {t:"Draw master-slave replication diagram from memory",note:"Practice exercise"},
+        {t:"List the failure scenarios for each replication strategy",note:"Critical thinking"},
+      ]},
+      {name:"Indexes, normalization & denormalization", src:"k", tasks:[
+        {t:"Read database indexes — B-tree, hash, types",note:"Chapter II — karanpratapsingh"},
+        {t:"Study normalization (1NF → 3NF) with examples",note:"Chapter II — karanpratapsingh"},
+        {t:"Read donnemartin's denormalization section",note:"donnemartin — Denormalization"},
+        {t:"When would you denormalize? Write your answer in 4 sentences",note:"Reflection"},
+      ]},
+      {name:"Transactions & BASE model", src:"k", tasks:[
+        {t:"Read transactions — isolation levels, serializability",note:"Chapter II — karanpratapsingh"},
+        {t:"Study BASE consistency model vs ACID",note:"Chapter II — karanpratapsingh"},
+        {t:"Read donnemartin: consistency patterns section",note:"donnemartin"},
+        {t:"Sketch a transaction conflict scenario and its resolution",note:"Practice exercise"},
+      ]},
+      {name:"DB week review", src:"b", tasks:[
+        {t:"Run Anki deck — database topics",note:"donnemartin Anki deck"},
+        {t:"Fill a comparison table: SQL vs 4 NoSQL types across 6 dimensions",note:"Consolidation"},
+        {t:"Explain CAP theorem out loud without notes",note:"Feynman technique"},
+        {t:"Write top 5 DB decisions you'd revisit in a real system",note:"Reflection"},
+      ]},
+    ]
+  },
+  {
+    color:"#854F0B", light:"#FAEEDA", border:"#FAC775", textc:"#633806",
+    title:"Async, messaging & communication",
+    intro:"Shift from storage to movement. This week covers how data flows between services — the backbone of every scalable architecture.",
+    days:[
+      {name:"Message queues & task queues", src:"k", tasks:[
+        {t:"Read message brokers and message queues",note:"Chapter III — karanpratapsingh"},
+        {t:"Study point-to-point vs pub/sub patterns",note:"Chapter III — karanpratapsingh"},
+        {t:"Cross-check donnemartin's asynchronism section",note:"donnemartin — Asynchronism"},
+        {t:"Sketch a web server + task queue + worker architecture",note:"Practice exercise"},
+      ]},
+      {name:"Event streaming & pub/sub", src:"k", tasks:[
+        {t:"Read event streaming platforms (Kafka-style)",note:"Chapter III — karanpratapsingh"},
+        {t:"Understand back pressure and when it matters",note:"donnemartin — Asynchronism"},
+        {t:"Compare message queues vs event streaming use cases",note:"Synthesis exercise"},
+        {t:"List 2 products that use Kafka and explain why",note:"Research exercise"},
+      ]},
+      {name:"Communication protocols — REST & RPC", src:"b", tasks:[
+        {t:"Read REST API design principles",note:"Chapter III — karanpratapsingh"},
+        {t:"Study RPC and gRPC",note:"Chapter III — karanpratapsingh"},
+        {t:"Read donnemartin: RPC vs REST comparison",note:"donnemartin — Communication"},
+        {t:"When would you use gRPC over REST? Write your answer",note:"Reflection"},
+      ]},
+      {name:"GraphQL, WebSockets & long polling", src:"k", tasks:[
+        {t:"Read GraphQL — queries, mutations, subscriptions",note:"Chapter III — karanpratapsingh"},
+        {t:"Study WebSockets vs long polling vs SSE",note:"Chapter III — karanpratapsingh"},
+        {t:"Cross-reference donnemartin TCP/UDP section",note:"donnemartin — Communication"},
+        {t:"For a live chat app, choose a protocol and justify it",note:"Design exercise"},
+      ]},
+      {name:"API gateway & service mesh", src:"k", tasks:[
+        {t:"Read API gateway patterns",note:"Chapter III — karanpratapsingh"},
+        {t:"Study service mesh concepts (Istio, Envoy-style)",note:"Chapter III — karanpratapsingh"},
+        {t:"Relate to donnemartin's reverse proxy section",note:"donnemartin"},
+        {t:"Draw a microservices architecture with API gateway",note:"Practice exercise"},
+      ]},
+      {name:"Microservices vs monolith", src:"b", tasks:[
+        {t:"Read microservices architecture",note:"Chapter III — karanpratapsingh"},
+        {t:"Read donnemartin's microservices + service discovery section",note:"donnemartin"},
+        {t:"List 3 trade-offs of microservices over monolith",note:"Critical thinking"},
+        {t:"Sketch a monolith → microservices migration diagram",note:"Practice exercise"},
+      ]},
+      {name:"Week 3 review", src:"b", tasks:[
+        {t:"Run Anki deck — communication & async topics",note:"donnemartin Anki deck"},
+        {t:"Compare pub/sub vs task queue out loud from memory",note:"Feynman technique"},
+        {t:"Write one paragraph: when would you NOT use microservices?",note:"Reflection"},
+        {t:"Sketch entire async messaging architecture from memory",note:"Consolidation"},
+      ]},
+    ]
+  },
+  {
+    color:"#185FA5", light:"#E6F1FB", border:"#85B7EB", textc:"#0C447C",
+    title:"Advanced patterns & reliability",
+    intro:"Move into distributed system patterns — the topics that separate mid-level engineers from seniors. Focus on understanding trade-offs, not memorising solutions.",
+    days:[
+      {name:"Consistent hashing & sharding", src:"k", tasks:[
+        {t:"Read consistent hashing in depth",note:"Chapter IV — karanpratapsingh"},
+        {t:"Study database sharding strategies",note:"donnemartin — Sharding"},
+        {t:"Explain consistent hashing to yourself without notes",note:"Feynman technique"},
+        {t:"Sketch a ring hash diagram with 3 nodes and 2 virtual nodes",note:"Practice exercise"},
+      ]},
+      {name:"Circuit breaker, retry & rate limiting", src:"k", tasks:[
+        {t:"Read circuit breaker pattern",note:"Chapter IV — karanpratapsingh"},
+        {t:"Study rate limiting algorithms: token bucket, leaky bucket",note:"Chapter IV — karanpratapsingh"},
+        {t:"When does a circuit breaker open vs close? Write the state machine",note:"Practice exercise"},
+        {t:"Find a real outage caused by missing circuit breakers (Netflix, etc.)",note:"Research exercise"},
+      ]},
+      {name:"Service discovery & heartbeats", src:"k", tasks:[
+        {t:"Read service discovery — client-side vs server-side",note:"Chapter IV — karanpratapsingh"},
+        {t:"Study heartbeat patterns for failure detection",note:"Chapter IV — karanpratapsingh"},
+        {t:"Cross-reference donnemartin: service discovery section",note:"donnemartin"},
+        {t:"Draw a service registry flow diagram",note:"Practice exercise"},
+      ]},
+      {name:"Distributed transactions & sagas", src:"k", tasks:[
+        {t:"Read distributed transactions — two-phase commit (2PC)",note:"Chapter IV — karanpratapsingh"},
+        {t:"Study the Saga pattern as an alternative to 2PC",note:"Chapter IV — karanpratapsingh"},
+        {t:"Compare 2PC vs Saga: when does each make sense?",note:"Critical thinking"},
+        {t:"Sketch a Saga choreography diagram for an order service",note:"Practice exercise"},
+      ]},
+      {name:"Geohashing, Quadtrees & location services", src:"k", tasks:[
+        {t:"Read geohashing and proximity search",note:"Chapter IV — karanpratapsingh"},
+        {t:"Study quadtrees for spatial indexing",note:"Chapter IV — karanpratapsingh"},
+        {t:"How would Uber use geohashing? Write a short answer",note:"Design exercise"},
+        {t:"Sketch a geohash grid with 3 precision levels",note:"Practice exercise"},
+      ]},
+      {name:"Bloom filters, event sourcing & CQRS", src:"k", tasks:[
+        {t:"Read Bloom filters — use cases and false positives",note:"Chapter IV — karanpratapsingh"},
+        {t:"Study event sourcing pattern",note:"Chapter IV — karanpratapsingh"},
+        {t:"Read CQRS — Command Query Responsibility Segregation",note:"Chapter IV — karanpratapsingh"},
+        {t:"When would you use CQRS + event sourcing together?",note:"Reflection"},
+      ]},
+      {name:"Week 4 deep review", src:"b", tasks:[
+        {t:"Run Anki deck — advanced patterns",note:"donnemartin Anki deck"},
+        {t:"Redraw consistent hashing and circuit breaker from memory",note:"Consolidation"},
+        {t:"Write trade-offs for: 2PC vs Saga, CQRS vs CRUD",note:"Critical thinking"},
+        {t:"Teach one pattern from this week to someone (or rubber duck)",note:"Feynman technique"},
+      ]},
+    ]
+  },
+  {
+    color:"#993C1D", light:"#FAECE7", border:"#F0997B", textc:"#712B13",
+    title:"Design walkthroughs — primer examples",
+    intro:"Now you apply everything. This week shifts to donnemartin's worked solutions. Read → close tab → redesign from memory. This is the highest-ROI activity for interviews.",
+    days:[
+      {name:"Interview approach framework", src:"p", tasks:[
+        {t:"Read donnemartin's 4-step system design interview approach",note:"donnemartin — How to approach"},
+        {t:"Memorise the 4 steps: scope → estimate → design → scale",note:"donnemartin"},
+        {t:"Read Karan's interview tips section",note:"Chapter V — karanpratapsingh"},
+        {t:"Write the 4-step framework on a card you'll keep nearby",note:"Reference card"},
+      ]},
+      {name:"Design Pastebin", src:"p", tasks:[
+        {t:"Attempt the design yourself — 30 min, no peeking",note:"Solo attempt first"},
+        {t:"Read donnemartin's Pastebin solution",note:"donnemartin — solutions/pastebin"},
+        {t:"Close the tab. Redraw the architecture from memory",note:"Recall practice"},
+        {t:"Note 3 things your design missed vs the solution",note:"Gap analysis"},
+      ]},
+      {name:"Design a URL shortener (Bit.ly)", src:"p", tasks:[
+        {t:"Solo design attempt — 45 min",note:"Solo attempt first"},
+        {t:"Read donnemartin's URL shortener walkthrough",note:"donnemartin — solutions/mint"},
+        {t:"Focus: how is the short code generated? What's the DB schema?",note:"Key questions"},
+        {t:"Estimate: QPS, storage needed for 1 billion URLs",note:"Back-of-envelope"},
+      ]},
+      {name:"Design a web crawler", src:"p", tasks:[
+        {t:"Solo design attempt — 45 min",note:"Solo attempt first"},
+        {t:"Read donnemartin's web crawler solution",note:"donnemartin — solutions/web_crawler"},
+        {t:"How does the crawler avoid loops and respect politeness?",note:"Key questions"},
+        {t:"Sketch the queue + fetch + parse + store pipeline",note:"Practice exercise"},
+      ]},
+      {name:"Design a social media feed (Twitter)", src:"p", tasks:[
+        {t:"Solo design attempt — 45 min",note:"Solo attempt first"},
+        {t:"Read donnemartin's Twitter-like feed solution",note:"donnemartin — solutions/twitter"},
+        {t:"Study the fan-out on write vs fan-out on read trade-off",note:"Key concept"},
+        {t:"When would you switch strategies based on follower count?",note:"Design exercise"},
+      ]},
+      {name:"Back-of-envelope estimation practice", src:"p", tasks:[
+        {t:"Memorise the latency numbers table from donnemartin appendix",note:"donnemartin — Appendix"},
+        {t:"Memorise powers of two for capacity estimation",note:"donnemartin — Appendix"},
+        {t:"Practice 3 estimation problems: storage for YouTube, QPS for Google",note:"Practice exercise"},
+        {t:"Time yourself: each estimate should take under 5 minutes",note:"Interview simulation"},
+      ]},
+      {name:"Week 5 design review", src:"b", tasks:[
+        {t:"Re-do one design from this week with a 45-min timer",note:"Timed practice"},
+        {t:"Write trade-offs you consistently miss across designs",note:"Self-audit"},
+        {t:"Run full Anki deck sweep",note:"donnemartin Anki deck"},
+        {t:"Review Karan's interview preparation checklist",note:"Chapter V — karanpratapsingh"},
+      ]},
+    ]
+  },
+  {
+    color:"#3B6D11", light:"#EAF3DE", border:"#97C459", textc:"#27500A",
+    title:"Mock interviews & consolidation",
+    intro:"Full simulation week. Every day is a timed design session. Speak out loud, practice estimation, and document your gaps. By Sunday you'll have a personal cheatsheet.",
+    days:[
+      {name:"Design a key-value store (like Redis)", src:"b", tasks:[
+        {t:"Solo design attempt — 45 min timed",note:"Mock interview"},
+        {t:"Cover: data model, in-memory vs disk, replication, eviction",note:"Checklist"},
+        {t:"Read relevant sections in both repos for gap analysis",note:"Review"},
+        {t:"Write: 3 things I'd do differently",note:"Reflection"},
+      ]},
+      {name:"Design a notification system", src:"b", tasks:[
+        {t:"Solo design attempt — 45 min timed",note:"Mock interview"},
+        {t:"Cover: push/pull, fan-out, rate limiting, retries",note:"Checklist"},
+        {t:"Relate to Karan's message broker section",note:"Chapter III — karanpratapsingh"},
+        {t:"Write: how does the system handle 10M notifications/day?",note:"Scale exercise"},
+      ]},
+      {name:"Design a ride-sharing service (Uber-like)", src:"b", tasks:[
+        {t:"Solo design attempt — 45 min timed",note:"Mock interview"},
+        {t:"Cover: geohashing, matching algorithm, real-time updates",note:"Checklist"},
+        {t:"Reference Karan's geohashing section for the location piece",note:"Chapter IV — karanpratapsingh"},
+        {t:"Estimate: how many drivers can the system track per second?",note:"Estimation exercise"},
+      ]},
+      {name:"Design a distributed cache (Memcached-like)", src:"b", tasks:[
+        {t:"Solo design attempt — 45 min timed",note:"Mock interview"},
+        {t:"Cover: consistent hashing, eviction, replication, client library",note:"Checklist"},
+        {t:"Reference Karan's consistent hashing + donnemartin caching sections",note:"Both repos"},
+        {t:"Write: LRU vs LFU eviction — when would you pick each?",note:"Trade-off exercise"},
+      ]},
+      {name:"Design an object storage system (S3-like)", src:"b", tasks:[
+        {t:"Solo design attempt — 45 min timed",note:"Mock interview"},
+        {t:"Cover: chunking, metadata service, replication, access control",note:"Checklist"},
+        {t:"Reference Karan's storage section (Chapter I)",note:"karanpratapsingh"},
+        {t:"Estimate: storage cost for 1 billion 5MB files",note:"Estimation exercise"},
+      ]},
+      {name:"Final Anki sweep & weak spots", src:"b", tasks:[
+        {t:"Run complete Anki deck — all topics",note:"donnemartin Anki deck"},
+        {t:"Re-read any section you struggled to recall this week",note:"Targeted review"},
+        {t:"Review Karan's full chapter list — any topic you skipped?",note:"karanpratapsingh"},
+        {t:"Mark your top 5 weakest topics for ongoing review",note:"Self-audit"},
+      ]},
+      {name:"Personal cheatsheet day", src:"b", tasks:[
+        {t:"Write a 2-page cheatsheet: key concepts, diagrams, trade-offs",note:"Final consolidation"},
+        {t:"Write your go-to framework for any system design interview",note:"Interview prep"},
+        {t:"Celebrate — you've completed the 6-week plan!",note:"You earned it"},
+        {t:"Share the repos with a friend or post your learnings online",note:"Teach to retain"},
+      ]},
+    ]
+  },
+];
+
+const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+const SRC_LABELS = {k:"karanpratapsingh", p:"donnemartin/primer", b:"Both repos"};
+const SRC_CLASS = {k:"src-k", p:"src-p", b:"src-b"};
+
+function getKey(wi,di,ti){return `sd-${wi}-${di}-${ti}`}
+
+function loadState(){
+  const keys=[];
+  WEEKS.forEach((w,wi)=>w.days.forEach((d,di)=>d.tasks.forEach((_,ti)=>keys.push(getKey(wi,di,ti)))));
+  return keys.reduce((acc,k)=>{
+    try{const v=localStorage.getItem(k); if(v)acc[k]=true;}catch(e){}
+    return acc;
+  },{});
+}
+
+function saveKey(k,v){try{if(v)localStorage.setItem(k,'1');else localStorage.removeItem(k);}catch(e){}}
+
+let state=loadState();
+
+function updateStats(){
+  let done=0,total=0;
+  WEEKS.forEach((w,wi)=>w.days.forEach((d,di)=>d.tasks.forEach((_,ti)=>{
+    total++;
+    if(state[getKey(wi,di,ti)])done++;
+  })));
+  document.getElementById('s-done').textContent=done;
+  document.getElementById('s-total').textContent=total;
+  document.getElementById('s-pct').textContent=Math.round(done/total*100)+'%';
+}
+
+function calcStreak(){
+  let streak=0;
+  outer:for(let wi=0;wi<WEEKS.length;wi++){
+    for(let di=0;di<WEEKS[wi].days.length;di++){
+      const tasks=WEEKS[wi].days[di].tasks;
+      const allDone=tasks.every((_,ti)=>state[getKey(wi,di,ti)]);
+      if(allDone)streak++;
+      else break outer;
+    }
+  }
+  document.getElementById('s-streak').textContent=streak;
+}
+
+function updateDayProgress(wi,di){
+  const tasks=WEEKS[wi].days[di].tasks;
+  const done=tasks.filter((_,ti)=>state[getKey(wi,di,ti)]).length;
+  const el=document.getElementById(`dprog-${wi}-${di}`);
+  const bar=document.getElementById(`dbar-${wi}-${di}`);
+  if(el)el.textContent=`${done}/${tasks.length}`;
+  if(bar)bar.style.width=Math.round(done/tasks.length*100)+'%';
+}
+
+function toggleTask(wi,di,ti,cb,itemEl){
+  const k=getKey(wi,di,ti);
+  const now=!state[k];
+  state[k]=now;
+  saveKey(k,now);
+  cb.classList.toggle('checked',now);
+  cb.querySelector('.check-inner').style.display=now?'block':'none';
+  if(now){cb.style.background=WEEKS[wi].color;cb.style.borderColor=WEEKS[wi].color;}
+  else{cb.style.background='';cb.style.borderColor='';}
+  itemEl.classList.toggle('done',now);
+  updateDayProgress(wi,di);
+  updateStats();
+  calcStreak();
+}
+
+function buildPanel(wi){
+  const w=WEEKS[wi];
+  const div=document.createElement('div');
+  div.className='week-panel';
+  div.id=`panel-${wi}`;
+
+  const intro=document.createElement('div');
+  intro.className='week-intro';
+  intro.style.cssText=`background:${w.light};border-color:${w.border}`;
+  intro.innerHTML=`<div class="theme" style="color:${w.color}"><span>Week ${wi+1}</span><span style="font-weight:400;color:${w.textc}">${w.title}</span></div><p style="color:${w.textc}">${w.intro}</p>`;
+  div.appendChild(intro);
+
+  w.days.forEach((d,di)=>{
+    const card=document.createElement('div');
+    card.className='day-card';
+
+    const hdr=document.createElement('div');
+    hdr.className='day-header';
+    hdr.innerHTML=`
+      <span class="day-pill" style="background:${w.color}">${DAYS[di]}</span>
+      <span class="day-name">${d.name}</span>
+      <span class="day-progress" id="dprog-${wi}-${di}">0/${d.tasks.length}</span>
+      <span class="day-chev" id="chev-${wi}-${di}">▼</span>
+    `;
+
+    const body=document.createElement('div');
+    body.className='day-body';
+    body.id=`body-${wi}-${di}`;
+
+    const inner=document.createElement('div');
+    inner.className='tasks-section';
+    inner.innerHTML=`<div class="source-tag ${SRC_CLASS[d.src]}">${SRC_LABELS[d.src]}</div><div class="tasks-label">Today's tasks</div>`;
+
+    d.tasks.forEach((task,ti)=>{
+      const k=getKey(wi,di,ti);
+      const isDone=!!state[k];
+      const item=document.createElement('div');
+      item.className='task-item'+(isDone?' done':'');
+      item.innerHTML=`
+        <div class="checkbox${isDone?' checked':''}" style="${isDone?`background:${w.color};border-color:${w.color}`:''}">
+          <span class="check-inner" style="display:${isDone?'block':'none'}">✓</span>
+        </div>
+        <div>
+          <div class="task-text">${task.t}</div>
+          <div class="task-meta">${task.note}</div>
+        </div>
+      `;
+      const cb=item.querySelector('.checkbox');
+      item.addEventListener('click',()=>toggleTask(wi,di,ti,cb,item));
+      inner.appendChild(item);
+    });
+
+    const ptrack=document.createElement('div');
+    ptrack.className='progress-track';
+    ptrack.style.marginTop='10px';
+    const pfill=document.createElement('div');
+    pfill.className='progress-fill-bar';
+    pfill.id=`dbar-${wi}-${di}`;
+    pfill.style.cssText=`background:${w.color};width:0%`;
+    ptrack.appendChild(pfill);
+    inner.appendChild(ptrack);
+
+    body.appendChild(inner);
+    card.appendChild(hdr);
+    card.appendChild(body);
+
+    hdr.addEventListener('click',()=>{
+      const isOpen=body.classList.contains('open');
+      body.classList.toggle('open',!isOpen);
+      document.getElementById(`chev-${wi}-${di}`).style.transform=isOpen?'':'rotate(180deg)';
+    });
+
+    div.appendChild(card);
+    updateDayProgress(wi,di);
+  });
+
+  return div;
+}
+
+const tabsEl=document.getElementById('week-tabs');
+const panelsEl=document.getElementById('panels');
+
+WEEKS.forEach((w,wi)=>{
+  const tab=document.createElement('div');
+  tab.className='week-tab'+(wi===0?' active':'');
+  tab.textContent=`W${wi+1}: ${w.title.split(' ').slice(0,3).join(' ')}`;
+  tab.addEventListener('click',()=>{
+    document.querySelectorAll('.week-tab').forEach(t=>{t.classList.remove('active');t.style.background='';t.style.color='';});
+    document.querySelectorAll('.week-panel').forEach(p=>p.classList.remove('active'));
+    tab.classList.add('active');
+    tab.style.background=w.color;
+    tab.style.color='#fff';
+    document.getElementById(`panel-${wi}`).classList.add('active');
+  });
+  if(wi===0){tab.style.background=w.color;tab.style.color='#fff';}
+  tabsEl.appendChild(tab);
+  const panel=buildPanel(wi);
+  panelsEl.appendChild(panel);
+});
+
+document.getElementById('panel-0').classList.add('active');
+updateStats();
+calcStreak();
+</script>
+</body>
+</html>
